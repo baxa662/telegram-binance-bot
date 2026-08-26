@@ -19,6 +19,13 @@ from database import (
     get_recent_signals,
 )
 
+from binance_client import (
+    get_futures_balance,
+    get_open_positions,
+    get_usdt_balance,
+    normalize_order_values,
+)
+
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -344,6 +351,14 @@ async def simulate_command(
             account_balance=balance["available"],
             risk_percent=1.0,
         )
+
+        normalized = normalize_order_values(
+            symbol=plan["symbol"],
+            quantity=plan["quantity"],
+            entry_price=plan["entry_price"],
+            stop_loss=plan["stop_loss"],
+            take_profits=plan["take_profits"],
+        )
     except Exception as exc:
         await update.message.reply_text(
             f"Error calculando operacion: {exc}"
@@ -354,16 +369,41 @@ async def simulate_command(
         "SIMULACION DE OPERACION\n\n"
         f"Par: {plan['symbol']}\n"
         f"Direccion: {plan['direction']}\n"
-        f"Entrada estimada: {plan['entry_price']:.8f}\n"
+        f"Leverage: x{plan['leverage']}\n\n"
+
+        "CALCULO ORIGINAL\n"
+        f"Entrada: {plan['entry_price']:.8f}\n"
+        f"Cantidad: {plan['quantity']:.8f}\n"
         f"SL: {plan['stop_loss']}\n"
         f"TPs: {plan['take_profits']}\n\n"
-        f"Balance disponible: {balance['available']:.2f} USDT\n"
-        f"Riesgo: {plan['risk_percent']:.2f}%\n"
-        f"Riesgo monetario: {plan['risk_amount']:.2f} USDT\n"
-        f"Cantidad: {plan['quantity']:.8f}\n"
-        f"Notional: {plan['notional']:.2f} USDT\n"
-        f"Margen estimado: {plan['margin_required']:.2f} USDT\n"
-        f"Leverage: x{plan['leverage']}\n\n"
+
+        "AJUSTADO A BINANCE\n"
+        f"Entrada: {normalized['entry_price']}\n"
+        f"Cantidad: {normalized['quantity']}\n"
+        f"SL: {normalized['stop_loss']}\n"
+        f"TPs: {normalized['take_profits']}\n\n"
+
+        f"Balance disponible: "
+        f"{balance['available']:.2f} USDT\n"
+
+        f"Riesgo: "
+        f"{plan['risk_percent']:.2f}%\n"
+
+        f"Riesgo monetario: "
+        f"{plan['risk_amount']:.2f} USDT\n"
+
+        f"Notional ajustado: "
+        f"{normalized['notional']:.2f} USDT\n"
+
+        f"Margen estimado: "
+        f"{normalized['notional'] / plan['leverage']:.2f} USDT\n\n"
+
+        "REGLAS BINANCE\n"
+        f"Tick size: {normalized['rules']['tick_size']}\n"
+        f"Step size: {normalized['rules']['step_size']}\n"
+        f"Min qty: {normalized['rules']['min_qty']}\n"
+        f"Min notional: {normalized['rules']['min_notional']}\n\n"
+
         "NO SE ENVIO NINGUNA ORDEN."
     )
 
