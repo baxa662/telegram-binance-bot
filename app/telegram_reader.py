@@ -1,11 +1,16 @@
 import os
 import logging
+
 from telethon import TelegramClient, events
+
+from signal_parser import parse_signal
 
 logger = logging.getLogger(__name__)
 
 API_ID = int(os.environ["TELEGRAM_API_ID"])
 API_HASH = os.environ["TELEGRAM_API_HASH"]
+
+SOURCE_CHANNEL_ID = int(os.environ["TELEGRAM_SOURCE_CHANNEL_ID"])
 
 SESSION_PATH = "/app/data/telegram"
 
@@ -15,13 +20,37 @@ client = TelegramClient(
     API_HASH
 )
 
-@client.on(events.NewMessage)
-async def on_new_message(event):
+
+@client.on(events.NewMessage(chats=SOURCE_CHANNEL_ID))
+async def on_signal_message(event):
     text = event.raw_text or ""
 
-    logger.info("===== NUEVO MENSAJE TELEGRAM =====")
-    logger.info(text)
-    logger.info("==================================")
+    logger.info(
+        "Nuevo mensaje del canal | message_id=%s",
+        event.id
+    )
+
+    logger.info("Texto recibido:\n%s", text)
+
+    signal = parse_signal(text)
+
+    if signal is None:
+        logger.info("El mensaje no parece ser una señal valida.")
+        return
+
+    logger.info("===== SENAL INTERPRETADA =====")
+    logger.info("Symbol: %s", signal["symbol"])
+    logger.info("Direction: %s", signal["direction"])
+    logger.info(
+        "Entry: %s - %s",
+        signal["entry_min"],
+        signal["entry_max"]
+    )
+    logger.info("TPs: %s", signal["take_profits"])
+    logger.info("SL: %s", signal["stop_loss"])
+    logger.info("Leverage: %sx", signal["leverage"])
+    logger.info("Margin: %s", signal["margin_type"])
+    logger.info("==============================")
 
 
 async def start_telegram():
@@ -39,6 +68,11 @@ async def start_telegram():
     logger.info(
         "Telegram conectado correctamente como %s",
         me.username or me.first_name
+    )
+
+    logger.info(
+        "Escuchando canal ID: %s",
+        SOURCE_CHANNEL_ID
     )
 
     await client.run_until_disconnected()
