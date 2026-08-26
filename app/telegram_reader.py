@@ -1,6 +1,7 @@
 import os
 import logging
 
+from notifier import send_signal_notification
 from telethon import TelegramClient, events
 
 from signal_parser import parse_signal
@@ -75,6 +76,8 @@ async def on_signal_message(event):
         chat_id,
         message_id
     )
+
+    await send_signal_notification(signal)
 
     logger.info("===== SENAL GUARDADA =====")
     logger.info("Symbol: %s", signal["symbol"])
