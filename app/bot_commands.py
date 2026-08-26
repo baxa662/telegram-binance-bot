@@ -26,7 +26,14 @@ TRADING_MODE = os.getenv(
 
 def is_admin(update: Update) -> bool:
     if update.effective_chat is None:
+        logger.warning("No effective_chat recibido")
         return False
+
+    logger.info(
+        "Comando recibido desde chat_id=%s | admin_configurado=%s",
+        update.effective_chat.id,
+        ADMIN_CHAT_ID
+    )
 
     return update.effective_chat.id == ADMIN_CHAT_ID
 
