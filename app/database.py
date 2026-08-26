@@ -44,6 +44,26 @@ def init_database():
             )
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS paper_trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_message_id INTEGER,
+                symbol TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                quantity REAL NOT NULL,
+                stop_loss REAL NOT NULL,
+                take_profits TEXT NOT NULL,
+                leverage INTEGER NOT NULL,
+                risk_percent REAL NOT NULL,
+                risk_amount REAL NOT NULL,
+                notional REAL NOT NULL,
+                margin_required REAL NOT NULL,
+                status TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         conn.commit()
 
     logger.info(
@@ -162,3 +182,53 @@ def get_recent_signals(limit: int = 5):
         rows = cursor.fetchall()
 
         return [dict(row) for row in rows]
+
+def save_paper_trade(
+    signal_message_id: int,
+    trade: dict
+):
+    take_profits = ",".join(
+        str(value)
+        for value in trade["take_profits"]
+    )
+
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO paper_trades (
+                signal_message_id,
+                symbol,
+                direction,
+                entry_price,
+                quantity,
+                stop_loss,
+                take_profits,
+                leverage,
+                risk_percent,
+                risk_amount,
+                notional,
+                margin_required,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                signal_message_id,
+                trade["symbol"],
+                trade["direction"],
+                trade["entry_price"],
+                trade["quantity"],
+                trade["stop_loss"],
+                take_profits,
+                trade["leverage"],
+                trade["risk_percent"],
+                trade["risk_amount"],
+                trade["notional"],
+                trade["margin_required"],
+                trade["status"],
+            )
+        )
+
+        conn.commit()
+
+        return cursor.lastrowid

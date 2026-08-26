@@ -3,6 +3,9 @@ import logging
 
 from notifier import send_signal_notification
 from telethon import TelegramClient, events
+from paper_trader import build_paper_trade
+from database import save_paper_trade
+from notifier import send_paper_trade_notification
 
 from signal_parser import parse_signal
 from database import (
@@ -76,6 +79,36 @@ async def on_signal_message(event):
         chat_id,
         message_id
     )
+
+    trading_mode = os.getenv(
+    "TRADING_MODE",
+    "MONITOR"
+).upper()
+
+if trading_mode == "PAPER":
+    try:
+        trade = build_paper_trade(signal)
+
+        paper_trade_id = save_paper_trade(
+            signal_message_id=message_id,
+            trade=trade
+        )
+
+        logger.info(
+            "Paper trade creado | id=%s | %s %s",
+            paper_trade_id,
+            trade["symbol"],
+            trade["direction"]
+        )
+
+        await send_paper_trade_notification(
+            trade
+        )
+
+    except Exception:
+        logger.exception(
+            "Error creando paper trade"
+        )
 
     await send_signal_notification(signal)
 
