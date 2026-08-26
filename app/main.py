@@ -1,8 +1,6 @@
 import asyncio
 import logging
 
-from telegram_reader import start_telegram
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
@@ -11,7 +9,9 @@ logging.basicConfig(
 async def main():
     logging.info("Crypto Signal Bot iniciado")
 
-    # await start_telegram()
+    while True:
+        logging.info("Bot activo...")
+        await asyncio.sleep(60)
 
 
 if __name__ == "__main__":
