@@ -1,5 +1,5 @@
-telethon
-python-telegram-bot
-python-dotenv
-pydantic
-binance-futures-connector
+telethon==1.40.0
+python-telegram-bot==22.8
+requests==2.32.5
+python-dotenv==1.1.1
+pydantic==2.11.7

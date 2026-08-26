@@ -1,410 +1,189 @@
-import os
+from __future__ import annotations
+
+import asyncio
+import json
 import logging
 
-from risk_manager import calculate_trade_plan
-from binance_client import get_usdt_balance
 from telegram import Update
-from binance_client import (
-    get_futures_balance,
-    get_open_positions,
-)
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-)
+from telegram.ext import Application, CommandHandler, ContextTypes
 
+from binance_api import execution_client, market_data_client
+from config import settings
 from database import (
     get_last_signal,
     get_recent_signals,
+    is_paused,
+    list_trades,
+    set_paused,
 )
-
-from binance_client import (
-    get_futures_balance,
-    get_open_positions,
-    get_usdt_balance,
-    normalize_order_values,
-)
+from trade_engine import manual_breakeven, manual_close
 
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-ADMIN_CHAT_ID = int(os.environ["TELEGRAM_ADMIN_CHAT_ID"])
 
-TRADING_MODE = os.getenv(
-    "TRADING_MODE",
-    "MONITOR"
-)
+def _authorized(update: Update) -> bool:
+    return bool(update.effective_chat and update.effective_chat.id == settings.telegram_admin_chat_id)
 
 
-def is_admin(update: Update) -> bool:
-    if update.effective_chat is None:
-        logger.warning("No effective_chat recibido")
-        return False
-
-    logger.info(
-        "Comando recibido desde chat_id=%s | admin_configurado=%s",
-        update.effective_chat.id,
-        ADMIN_CHAT_ID
-    )
-
-    return update.effective_chat.id == ADMIN_CHAT_ID
-
-
-async def deny_if_not_admin(update: Update) -> bool:
-    if is_admin(update):
-        return False
-
+async def _guard(update: Update) -> bool:
+    if _authorized(update):
+        return True
     if update.message:
-        await update.message.reply_text(
-            "No autorizado."
-        )
-
-    return True
+        await update.message.reply_text("No autorizado.")
+    return False
 
 
-async def status_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    if await deny_if_not_admin(update):
-        return
-
-    message = (
-        "Estado del bot\n\n"
-        "Telegram Reader: activo\n"
-        "Parser: activo\n"
-        "Base de datos: activa\n"
-        f"Trading mode: {TRADING_MODE}\n\n"
-        "Binance: conectado en modo lectura"
-    )
-
-    await update.message.reply_text(message)
-
-
-async def lastsignal_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    if await deny_if_not_admin(update):
-        return
-
-    signal = get_last_signal()
-
-    if signal is None:
-        await update.message.reply_text(
-            "No hay señales guardadas."
-        )
-        return
-
-    message = (
-        "Ultima señal\n\n"
-        f"Par: {signal['symbol']}\n"
-        f"Dirección: {signal['direction']}\n"
-        f"Entrada: {signal['entry_min']} - {signal['entry_max']}\n"
-        f"TPs: {signal['take_profits']}\n"
-        f"SL: {signal['stop_loss']}\n"
-        f"Apalancamiento: x{signal['leverage']}\n"
-        f"Margen: {signal['margin_type']}\n"
-        f"Message ID: {signal['message_id']}"
-    )
-
-    await update.message.reply_text(message)
-
-
-async def signals_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    if await deny_if_not_admin(update):
-        return
-
-    signals = get_recent_signals(limit=5)
-
-    if not signals:
-        await update.message.reply_text(
-            "No hay señales guardadas."
-        )
-        return
-
-    lines = [
-        "Ultimas señales",
-        ""
-    ]
-
-    for signal in signals:
-        lines.append(
-            f"{signal['symbol']} | "
-            f"{signal['direction']} | "
-            f"x{signal['leverage']} | "
-            f"SL {signal['stop_loss']}"
-        )
-
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update): return
+    live = "habilitado" if settings.live_orders_enabled else "bloqueado"
     await update.message.reply_text(
-        "\n".join(lines)
+        f"Estado\n\nModo: {settings.trading_mode}\nPausado: {'SI' if is_paused() else 'NO'}\n"
+        f"Produccion live: {live}\nCanal: {settings.telegram_source_channel_id}"
     )
 
 
-def build_bot_application():
-    application = (
-        Application
-        .builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-
-    application.add_handler(
-        CommandHandler(
-            "status",
-            status_command
+async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update): return
+    try:
+        client = execution_client() if settings.is_testnet else market_data_client()
+        balance = await asyncio.to_thread(client.usdt_balance)
+        await update.message.reply_text(
+            f"Balance USDT\nTotal: {balance['balance']:.4f}\nDisponible: {balance['available']:.4f}"
         )
+    except Exception as exc:
+        await update.message.reply_text(f"Error Binance: {exc}")
+
+
+async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update): return
+    if settings.is_paper:
+        trades = list_trades(["OPEN"], 20)
+        if not trades:
+            await update.message.reply_text("No hay paper trades abiertos.")
+            return
+        lines = ["Paper trades abiertos", ""]
+        for t in trades:
+            lines.append(f"#{t['id']} {t['symbol']} {t['direction']} | entry {t['entry_price']} | SL {t['current_stop_loss']}")
+        await update.message.reply_text("\n".join(lines))
+        return
+    try:
+        client = execution_client()
+        positions = await asyncio.to_thread(client.open_positions)
+        if not positions:
+            await update.message.reply_text("No hay posiciones abiertas.")
+            return
+        lines = ["Posiciones Binance", ""]
+        for p in positions:
+            direction = "LONG" if float(p["positionAmt"]) > 0 else "SHORT"
+            lines.extend([
+                f"{p['symbol']} {direction}",
+                f"Qty: {p['positionAmt']}",
+                f"Entry: {p['entryPrice']}",
+                f"Mark: {p.get('markPrice', '?')}",
+                f"PnL: {p.get('unRealizedProfit', '?')}",
+                "",
+            ])
+        await update.message.reply_text("\n".join(lines)[:4000])
+    except Exception as exc:
+        await update.message.reply_text(f"Error Binance: {exc}")
+
+
+async def lastsignal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update): return
+    s = get_last_signal()
+    if not s:
+        await update.message.reply_text("No hay señales guardadas.")
+        return
+    await update.message.reply_text(
+        f"Ultima señal\n\n{s['symbol']} {s['direction']}\n"
+        f"Entrada: {s['entry_min']} - {s['entry_max']}\nTPs: {s['take_profits']}\n"
+        f"SL: {s['stop_loss']}\nLeverage: x{s['leverage']}"
     )
 
-    application.add_handler(
-        CommandHandler(
-            "lastsignal",
-            lastsignal_command
-        )
-    )
 
-    application.add_handler(
-        CommandHandler(
-            "signals",
-            signals_command
-        )
-    )
+async def signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update): return
+    rows = get_recent_signals(5)
+    if not rows:
+        await update.message.reply_text("No hay señales guardadas.")
+        return
+    await update.message.reply_text("\n".join(["Ultimas señales", ""] + [f"#{r['id']} {r['symbol']} {r['direction']} x{r['leverage']}" for r in rows]))
 
-    application.add_handler(
-        CommandHandler(
-            "balance",
-            balance_command
-        )
-    )
 
-    application.add_handler(
-        CommandHandler(
-            "positions",
-            positions_command
-        )
-    )
+async def trades_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update): return
+    rows = list_trades(None, 10)
+    if not rows:
+        await update.message.reply_text("No hay trades guardados.")
+        return
+    lines = ["Ultimos trades", ""]
+    for t in rows:
+        lines.append(f"#{t['id']} [{t['mode']}] {t['symbol']} {t['direction']} - {t['status']}")
+    await update.message.reply_text("\n".join(lines))
 
-    application.add_handler(
-        CommandHandler(
-            "simulate",
-            simulate_command
-        )
-    )
 
-    return application
+async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update): return
+    set_paused(True)
+    await update.message.reply_text("Bot pausado. No abrira nuevas operaciones; seguira gestionando las abiertas.")
+
+
+async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update): return
+    set_paused(False)
+    await update.message.reply_text("Bot reanudado.")
+
+
+async def breakeven_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update): return
+    if not settings.allow_manual_breakeven:
+        await update.message.reply_text("Comando deshabilitado por configuracion.")
+        return
+    if not context.args:
+        await update.message.reply_text("Uso: /breakeven BTCUSDT")
+        return
+    try:
+        await update.message.reply_text(await manual_breakeven(context.args[0].upper()))
+    except Exception as exc:
+        await update.message.reply_text(f"Error: {exc}")
+
+
+async def close_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update): return
+    if not settings.allow_manual_close:
+        await update.message.reply_text("Comando deshabilitado por configuracion.")
+        return
+    if not context.args:
+        await update.message.reply_text("Uso: /close BTCUSDT")
+        return
+    try:
+        await update.message.reply_text(await manual_close(context.args[0].upper()))
+    except Exception as exc:
+        await update.message.reply_text(f"Error: {exc}")
+
+
+def build_bot_application() -> Application:
+    app = Application.builder().token(settings.telegram_bot_token).build()
+    for name, fn in [
+        ("status", status_command),
+        ("balance", balance_command),
+        ("positions", positions_command),
+        ("lastsignal", lastsignal_command),
+        ("signals", signals_command),
+        ("trades", trades_command),
+        ("pause", pause_command),
+        ("resume", resume_command),
+        ("breakeven", breakeven_command),
+        ("close", close_command),
+    ]:
+        app.add_handler(CommandHandler(name, fn))
+    return app
 
 
 async def start_bot_commands():
-    logger.info(
-        "Iniciando bot de comandos..."
-    )
-
-    application = build_bot_application()
-
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-
-    logger.info(
-        "Bot de comandos iniciado."
-    )
-
-    return application
-
-async def balance_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    if await deny_if_not_admin(update):
-        return
-
-    try:
-        balances = get_futures_balance()
-
-        if not balances:
-            await update.message.reply_text(
-                "No hay balances disponibles."
-            )
-            return
-
-        lines = [
-            "Balance Futures",
-            ""
-        ]
-
-        for item in balances:
-            lines.append(
-                f"{item['asset']}: "
-                f"{item['balance']:.8f} "
-                f"(disponible: {item['available']:.8f})"
-            )
-
-        await update.message.reply_text(
-            "\n".join(lines)
-        )
-
-    except Exception as exc:
-        logger.exception(
-            "Error consultando balance de Binance"
-        )
-
-        await update.message.reply_text(
-            f"Error consultando Binance: {exc}"
-        )
-
-
-async def positions_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    if await deny_if_not_admin(update):
-        return
-
-    try:
-        positions = get_open_positions()
-
-        if not positions:
-            await update.message.reply_text(
-                "No hay posiciones abiertas."
-            )
-            return
-
-        lines = [
-            "Posiciones abiertas",
-            ""
-        ]
-
-        for position in positions:
-            direction = (
-                "LONG"
-                if position["position_amount"] > 0
-                else "SHORT"
-            )
-
-            lines.extend([
-                f"{position['symbol']} | {direction}",
-                f"Cantidad: {position['position_amount']}",
-                f"Entrada: {position['entry_price']}",
-                f"Mark: {position['mark_price']}",
-                f"PnL: {position['unrealized_profit']:.4f}",
-                f"Leverage: x{position['leverage']}",
-                f"Margin: {position['margin_type']}",
-                ""
-            ])
-
-        await update.message.reply_text(
-            "\n".join(lines)
-        )
-
-    except Exception as exc:
-        logger.exception(
-            "Error consultando posiciones"
-        )
-
-        await update.message.reply_text(
-            f"Error consultando Binance: {exc}"
-        )
-
-async def simulate_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    if await deny_if_not_admin(update):
-        return
-
-    signal = get_last_signal()
-
-    if signal is None:
-        await update.message.reply_text(
-            "No hay señales guardadas."
-        )
-        return
-
-    signal_data = {
-        "symbol": signal["symbol"],
-        "direction": signal["direction"],
-        "entry_min": signal["entry_min"],
-        "entry_max": signal["entry_max"],
-        "take_profits": [
-            float(x)
-            for x in signal["take_profits"].split(",")
-        ],
-        "stop_loss": signal["stop_loss"],
-        "leverage": signal["leverage"],
-    }
-
-    balance = get_usdt_balance()
-
-    if balance["available"] <= 0:
-        await update.message.reply_text(
-            "No hay USDT disponibles en Futures."
-        )
-        return
-
-    try:
-        plan = calculate_trade_plan(
-            signal=signal_data,
-            account_balance=balance["available"],
-            risk_percent=1.0,
-        )
-
-        normalized = normalize_order_values(
-            symbol=plan["symbol"],
-            quantity=plan["quantity"],
-            entry_price=plan["entry_price"],
-            stop_loss=plan["stop_loss"],
-            take_profits=plan["take_profits"],
-        )
-    except Exception as exc:
-        await update.message.reply_text(
-            f"Error calculando operacion: {exc}"
-        )
-        return
-
-    message = (
-        "SIMULACION DE OPERACION\n\n"
-        f"Par: {plan['symbol']}\n"
-        f"Direccion: {plan['direction']}\n"
-        f"Leverage: x{plan['leverage']}\n\n"
-
-        "CALCULO ORIGINAL\n"
-        f"Entrada: {plan['entry_price']:.8f}\n"
-        f"Cantidad: {plan['quantity']:.8f}\n"
-        f"SL: {plan['stop_loss']}\n"
-        f"TPs: {plan['take_profits']}\n\n"
-
-        "AJUSTADO A BINANCE\n"
-        f"Entrada: {normalized['entry_price']}\n"
-        f"Cantidad: {normalized['quantity']}\n"
-        f"SL: {normalized['stop_loss']}\n"
-        f"TPs: {normalized['take_profits']}\n\n"
-
-        f"Balance disponible: "
-        f"{balance['available']:.2f} USDT\n"
-
-        f"Riesgo: "
-        f"{plan['risk_percent']:.2f}%\n"
-
-        f"Riesgo monetario: "
-        f"{plan['risk_amount']:.2f} USDT\n"
-
-        f"Notional ajustado: "
-        f"{normalized['notional']:.2f} USDT\n"
-
-        f"Margen estimado: "
-        f"{normalized['notional'] / plan['leverage']:.2f} USDT\n\n"
-
-        "REGLAS BINANCE\n"
-        f"Tick size: {normalized['rules']['tick_size']}\n"
-        f"Step size: {normalized['rules']['step_size']}\n"
-        f"Min qty: {normalized['rules']['min_qty']}\n"
-        f"Min notional: {normalized['rules']['min_notional']}\n\n"
-
-        "NO SE ENVIO NINGUNA ORDEN."
-    )
-
-    await update.message.reply_text(message)
+    app = build_bot_application()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(drop_pending_updates=False)
+    logger.info("Bot de comandos iniciado")
+    return app

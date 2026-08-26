@@ -1,72 +1,56 @@
-import os
+from __future__ import annotations
+
 import logging
 
 from telegram import Bot
 
+from config import settings
+from models import Signal
+
 logger = logging.getLogger(__name__)
-
-BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-ADMIN_CHAT_ID = int(os.environ["TELEGRAM_ADMIN_CHAT_ID"])
-
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(settings.telegram_bot_token)
 
 
-async def send_signal_notification(signal: dict):
-    tps = "\n".join(
-        f"TP{i + 1}: {value}"
-        for i, value in enumerate(signal["take_profits"])
-    )
-
-    message = (
-        "Nueva señal detectada\n\n"
-        f"Par: {signal['symbol']}\n"
-        f"Dirección: {signal['direction']}\n"
-        f"Entrada: {signal['entry_min']} - {signal['entry_max']}\n"
-        f"{tps}\n"
-        f"SL: {signal['stop_loss']}\n"
-        f"Apalancamiento: x{signal['leverage']}\n"
-        f"Margen: {signal['margin_type']}\n\n"
-        "Modo actual: MONITOR\n"
-        "No se ejecutó ninguna operación."
-    )
-
+async def send(text: str):
     try:
-        await bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=message
-        )
-
-        logger.info(
-            "Notificacion enviada a Telegram."
-        )
-
+        await bot.send_message(chat_id=settings.telegram_admin_chat_id, text=text)
     except Exception:
-        logger.exception(
-            "Error enviando notificacion por Telegram."
-        )
+        logger.exception("No se pudo enviar notificacion")
 
-async def send_paper_trade_notification(trade: dict):
-    tps = "\n".join(
-        f"TP{i + 1}: {value}"
-        for i, value in enumerate(trade["take_profits"])
+
+async def signal_detected(signal: Signal, mode: str):
+    tps = "\n".join(f"TP{i+1}: {tp}" for i, tp in enumerate(signal.take_profits))
+    await send(
+        f"Nueva señal detectada\n\n"
+        f"{signal.symbol} {signal.direction}\n"
+        f"Entrada: {signal.entry_min} - {signal.entry_max}\n"
+        f"{tps}\nSL: {signal.stop_loss}\n"
+        f"Leverage señal: x{signal.leverage}\n"
+        f"Modo: {mode}"
     )
 
-    message = (
-        "PAPER TRADE CREADO\n\n"
-        f"Par: {trade['symbol']}\n"
-        f"Direccion: {trade['direction']}\n"
-        f"Entrada: {trade['entry_price']}\n"
-        f"Cantidad: {trade['quantity']}\n"
-        f"{tps}\n"
-        f"SL: {trade['stop_loss']}\n"
-        f"Leverage: x{trade['leverage']}\n"
-        f"Riesgo: {trade['risk_percent']:.2f}%\n"
-        f"Riesgo monetario: {trade['risk_amount']:.2f} USDT\n"
-        f"Margen estimado: {trade['margin_required']:.2f} USDT\n\n"
-        "SIMULACION - no se envio ninguna orden real."
+
+async def trade_opened(trade: dict):
+    await send(
+        f"OPERACION ABIERTA [{trade['mode']}]\n\n"
+        f"{trade['symbol']} {trade['direction']}\n"
+        f"Entrada: {trade['entry_price']}\nCantidad: {trade['quantity']}\n"
+        f"SL: {trade['current_stop_loss']}\nLeverage: x{trade['leverage']}\n"
+        f"Riesgo: {trade.get('risk_amount', 0):.2f} USDT"
     )
 
-    await bot.send_message(
-        chat_id=ADMIN_CHAT_ID,
-        text=message
-    )
+
+async def tp_filled(trade: dict, index: int, price: float):
+    await send(f"TP{index+1} alcanzado\n{trade['symbol']} {trade['direction']}\nPrecio: {price}")
+
+
+async def sl_moved(trade: dict, old: float, new: float):
+    await send(f"SL movido\n{trade['symbol']}\n{old} -> {new}")
+
+
+async def trade_closed(trade: dict, reason: str):
+    await send(f"OPERACION CERRADA [{trade['mode']}]\n{trade['symbol']}\nMotivo: {reason}")
+
+
+async def error(text: str):
+    await send(f"ERROR\n{text}")

@@ -1,164 +1,62 @@
-import os
+from __future__ import annotations
+
 import logging
 
-from notifier import send_signal_notification
 from telethon import TelegramClient, events
-from paper_trader import build_paper_trade
-from database import save_paper_trade
-from notifier import send_paper_trade_notification
 
+from config import settings
+from database import is_message_processed, mark_message_processed, save_signal
+from notifier import error as notify_error
+from notifier import signal_detected
 from signal_parser import parse_signal
-from database import (
-    is_message_processed,
-    mark_message_processed,
-    save_signal,
-)
+from trade_engine import enqueue_signal
 
 logger = logging.getLogger(__name__)
 
-API_ID = int(os.environ["TELEGRAM_API_ID"])
-API_HASH = os.environ["TELEGRAM_API_HASH"]
-
-SOURCE_CHANNEL_ID = int(
-    os.environ["TELEGRAM_SOURCE_CHANNEL_ID"]
-)
-
-SESSION_PATH = "/app/data/telegram"
-
 client = TelegramClient(
-    SESSION_PATH,
-    API_ID,
-    API_HASH
+    settings.telegram_session_path,
+    settings.telegram_api_id,
+    settings.telegram_api_hash,
 )
 
 
-@client.on(events.NewMessage(chats=SOURCE_CHANNEL_ID))
+@client.on(events.NewMessage(chats=settings.telegram_source_channel_id))
 async def on_signal_message(event):
-    chat_id = event.chat_id
-    message_id = event.id
+    chat_id = int(event.chat_id)
+    message_id = int(event.id)
     text = event.raw_text or ""
 
-    logger.info(
-        "Nuevo mensaje | chat_id=%s | message_id=%s",
-        chat_id,
-        message_id
-    )
-
-    if is_message_processed(
-        chat_id,
-        message_id
-    ):
-        logger.info(
-            "Mensaje %s ya fue procesado. Ignorando.",
-            message_id
-        )
+    if is_message_processed(chat_id, message_id):
         return
 
-    signal = parse_signal(text)
-
-    if signal is None:
-        logger.info(
-            "El mensaje no parece una señal valida."
-        )
-
-        mark_message_processed(
-            chat_id,
-            message_id
-        )
-
-        return
-
-    save_signal(
-        chat_id=chat_id,
-        message_id=message_id,
-        signal=signal,
-        raw_text=text
-    )
-
-    mark_message_processed(
-        chat_id,
-        message_id
-    )
-
-    trading_mode = os.getenv(
-    "TRADING_MODE",
-    "MONITOR"
-).upper()
-
-if trading_mode == "PAPER":
     try:
-        trade = build_paper_trade(signal)
+        signal = parse_signal(text)
+        mark_message_processed(chat_id, message_id)
+        if signal is None:
+            logger.info("Mensaje %s ignorado: no parece señal", message_id)
+            return
 
-        paper_trade_id = save_paper_trade(
-            signal_message_id=message_id,
-            trade=trade
-        )
+        signal_id = save_signal(chat_id, message_id, signal, text)
+        logger.info("Señal %s guardada: %s %s", signal_id, signal.symbol, signal.direction)
+        await signal_detected(signal, settings.trading_mode)
 
-        logger.info(
-            "Paper trade creado | id=%s | %s %s",
-            paper_trade_id,
-            trade["symbol"],
-            trade["direction"]
-        )
-
-        await send_paper_trade_notification(
-            trade
-        )
-
-    except Exception:
-        logger.exception(
-            "Error creando paper trade"
-        )
-
-    await send_signal_notification(signal)
-
-    logger.info("===== SENAL GUARDADA =====")
-    logger.info("Symbol: %s", signal["symbol"])
-    logger.info("Direction: %s", signal["direction"])
-    logger.info(
-        "Entry: %s - %s",
-        signal["entry_min"],
-        signal["entry_max"]
-    )
-    logger.info(
-        "TPs: %s",
-        signal["take_profits"]
-    )
-    logger.info(
-        "SL: %s",
-        signal["stop_loss"]
-    )
-    logger.info(
-        "Leverage: %sx",
-        signal["leverage"]
-    )
-    logger.info(
-        "Margin: %s",
-        signal["margin_type"]
-    )
-    logger.info("==========================")
+        try:
+            trade_id = await enqueue_signal(signal_id, signal)
+            if trade_id:
+                logger.info("Trade pendiente creado id=%s", trade_id)
+        except Exception as exc:
+            logger.warning("Señal guardada pero no encolada: %s", exc)
+            await notify_error(f"Señal {signal.symbol}: {exc}")
+    except Exception as exc:
+        logger.exception("Error procesando mensaje Telegram")
+        await notify_error(f"Mensaje {message_id}: {exc}")
 
 
-async def start_telegram():
-    logger.info("Conectando con Telegram...")
-
+async def start_telegram_reader():
+    logger.info("Conectando Telethon...")
     await client.connect()
-
     if not await client.is_user_authorized():
-        raise RuntimeError(
-            "La sesion de Telegram no esta autorizada."
-        )
-
+        raise RuntimeError("Sesion Telethon no autorizada. Ejecuta scripts/create_telegram_session.py")
     me = await client.get_me()
-
-    logger.info(
-        "Telegram conectado correctamente como %s",
-        me.username or me.first_name
-    )
-
-    logger.info(
-        "Escuchando canal ID: %s",
-        SOURCE_CHANNEL_ID
-    )
-
+    logger.info("Telethon conectado como %s. Canal=%s", me.username or me.first_name, settings.telegram_source_channel_id)
     await client.run_until_disconnected()
