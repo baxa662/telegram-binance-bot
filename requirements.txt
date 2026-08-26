@@ -2,3 +2,4 @@ telethon
 python-telegram-bot
 python-dotenv
 pydantic
+binance-connector

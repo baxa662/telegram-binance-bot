@@ -2,6 +2,10 @@ import os
 import logging
 
 from telegram import Update
+from binance_client import (
+    get_futures_balance,
+    get_open_positions,
+)
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -63,7 +67,7 @@ async def status_command(
         "Parser: activo\n"
         "Base de datos: activa\n"
         f"Trading mode: {TRADING_MODE}\n\n"
-        "Binance: no conectado"
+        "Binance: conectado en modo lectura"
     )
 
     await update.message.reply_text(message)
@@ -161,6 +165,20 @@ def build_bot_application():
         )
     )
 
+    application.add_handler(
+        CommandHandler(
+            "balance",
+            balance_command
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "positions",
+            positions_command
+        )
+    )
+
     return application
 
 
@@ -180,3 +198,97 @@ async def start_bot_commands():
     )
 
     return application
+
+async def balance_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    if await deny_if_not_admin(update):
+        return
+
+    try:
+        balances = get_futures_balance()
+
+        if not balances:
+            await update.message.reply_text(
+                "No hay balances disponibles."
+            )
+            return
+
+        lines = [
+            "Balance Futures",
+            ""
+        ]
+
+        for item in balances:
+            lines.append(
+                f"{item['asset']}: "
+                f"{item['balance']:.8f} "
+                f"(disponible: {item['available']:.8f})"
+            )
+
+        await update.message.reply_text(
+            "\n".join(lines)
+        )
+
+    except Exception as exc:
+        logger.exception(
+            "Error consultando balance de Binance"
+        )
+
+        await update.message.reply_text(
+            f"Error consultando Binance: {exc}"
+        )
+
+
+async def positions_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    if await deny_if_not_admin(update):
+        return
+
+    try:
+        positions = get_open_positions()
+
+        if not positions:
+            await update.message.reply_text(
+                "No hay posiciones abiertas."
+            )
+            return
+
+        lines = [
+            "Posiciones abiertas",
+            ""
+        ]
+
+        for position in positions:
+            direction = (
+                "LONG"
+                if position["position_amount"] > 0
+                else "SHORT"
+            )
+
+            lines.extend([
+                f"{position['symbol']} | {direction}",
+                f"Cantidad: {position['position_amount']}",
+                f"Entrada: {position['entry_price']}",
+                f"Mark: {position['mark_price']}",
+                f"PnL: {position['unrealized_profit']:.4f}",
+                f"Leverage: x{position['leverage']}",
+                f"Margin: {position['margin_type']}",
+                ""
+            ])
+
+        await update.message.reply_text(
+            "\n".join(lines)
+        )
+
+    except Exception as exc:
+        logger.exception(
+            "Error consultando posiciones"
+        )
+
+        await update.message.reply_text(
+            f"Error consultando Binance: {exc}"
+        )
