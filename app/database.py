@@ -129,36 +129,36 @@ def save_signal(
 
         conn.commit()
 
-    def get_last_signal():
-        with get_connection() as conn:
-            conn.row_factory = sqlite3.Row
+def get_last_signal():
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
 
-            cursor = conn.execute("""
-                SELECT *
-                FROM signals
-                ORDER BY id DESC
-                LIMIT 1
-            """)
+        cursor = conn.execute("""
+            SELECT *
+            FROM signals
+            ORDER BY id DESC
+            LIMIT 1
+        """)
 
-            row = cursor.fetchone()
+        row = cursor.fetchone()
 
-            if row is None:
-                return None
+        if row is None:
+            return None
 
-            return dict(row)
+        return dict(row)
 
 
-    def get_recent_signals(limit: int = 5):
-        with get_connection() as conn:
-            conn.row_factory = sqlite3.Row
+def get_recent_signals(limit: int = 5):
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
 
-            cursor = conn.execute("""
-                SELECT *
-                FROM signals
-                ORDER BY id DESC
-                LIMIT ?
-            """, (limit,))
+        cursor = conn.execute("""
+            SELECT *
+            FROM signals
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,))
 
-            rows = cursor.fetchall()
+        rows = cursor.fetchall()
 
-            return [dict(row) for row in rows]
+        return [dict(row) for row in rows]
