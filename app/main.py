@@ -11,7 +11,7 @@ logging.basicConfig(
 async def main():
     logging.info("Crypto Signal Bot iniciado")
 
-    await start_telegram()
+    # await start_telegram()
 
 
 if __name__ == "__main__":
