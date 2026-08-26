@@ -8,8 +8,11 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
+logger = logging.getLogger(__name__)
+
+
 async def main():
-    logging.info("Crypto Signal Bot iniciado")
+    logger.info("Crypto Signal Bot iniciado")
 
     await start_telegram()
 
