@@ -23,7 +23,7 @@ def get_futures_balance():
         balance = float(item["balance"])
         available = float(item["availableBalance"])
 
-        if balance > 0:
+        if item["asset"] == "USDT" or balance > 0:
             result.append({
                 "asset": item["asset"],
                 "balance": balance,
@@ -57,3 +57,18 @@ def get_open_positions():
         })
 
     return result
+
+def get_usdt_balance():
+    balances = client.balance()
+
+    for item in balances:
+        if item["asset"] == "USDT":
+            return {
+                "balance": float(item["balance"]),
+                "available": float(item["availableBalance"]),
+            }
+
+    return {
+        "balance": 0.0,
+        "available": 0.0,
+    }

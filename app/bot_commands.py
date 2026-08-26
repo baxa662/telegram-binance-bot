@@ -1,6 +1,8 @@
 import os
 import logging
 
+from risk_manager import calculate_trade_plan
+from binance_client import get_usdt_balance
 from telegram import Update
 from binance_client import (
     get_futures_balance,
@@ -179,6 +181,13 @@ def build_bot_application():
         )
     )
 
+    application.add_handler(
+        CommandHandler(
+            "simulate",
+            simulate_command
+        )
+    )
+
     return application
 
 
@@ -292,3 +301,70 @@ async def positions_command(
         await update.message.reply_text(
             f"Error consultando Binance: {exc}"
         )
+
+async def simulate_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    if await deny_if_not_admin(update):
+        return
+
+    signal = get_last_signal()
+
+    if signal is None:
+        await update.message.reply_text(
+            "No hay señales guardadas."
+        )
+        return
+
+    signal_data = {
+        "symbol": signal["symbol"],
+        "direction": signal["direction"],
+        "entry_min": signal["entry_min"],
+        "entry_max": signal["entry_max"],
+        "take_profits": [
+            float(x)
+            for x in signal["take_profits"].split(",")
+        ],
+        "stop_loss": signal["stop_loss"],
+        "leverage": signal["leverage"],
+    }
+
+    balance = get_usdt_balance()
+
+    if balance["available"] <= 0:
+        await update.message.reply_text(
+            "No hay USDT disponibles en Futures."
+        )
+        return
+
+    try:
+        plan = calculate_trade_plan(
+            signal=signal_data,
+            account_balance=balance["available"],
+            risk_percent=1.0,
+        )
+    except Exception as exc:
+        await update.message.reply_text(
+            f"Error calculando operacion: {exc}"
+        )
+        return
+
+    message = (
+        "SIMULACION DE OPERACION\n\n"
+        f"Par: {plan['symbol']}\n"
+        f"Direccion: {plan['direction']}\n"
+        f"Entrada estimada: {plan['entry_price']:.8f}\n"
+        f"SL: {plan['stop_loss']}\n"
+        f"TPs: {plan['take_profits']}\n\n"
+        f"Balance disponible: {balance['available']:.2f} USDT\n"
+        f"Riesgo: {plan['risk_percent']:.2f}%\n"
+        f"Riesgo monetario: {plan['risk_amount']:.2f} USDT\n"
+        f"Cantidad: {plan['quantity']:.8f}\n"
+        f"Notional: {plan['notional']:.2f} USDT\n"
+        f"Margen estimado: {plan['margin_required']:.2f} USDT\n"
+        f"Leverage: x{plan['leverage']}\n\n"
+        "NO SE ENVIO NINGUNA ORDEN."
+    )
+
+    await update.message.reply_text(message)
