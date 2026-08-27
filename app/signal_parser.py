@@ -60,7 +60,7 @@ def _extract_take_profits(text: str) -> list[float]:
 
 
 def _extract_stop_loss(text: str) -> Optional[float]:
-    match = re.search(r"\bSL\s*:\s*([\d.]+)", text, re.IGNORECASE)
+    match = re.search(r"\b(?:SL|Stop\s+Loss)\s*:\s*([\d.]+)", text, re.IGNORECASE)
     return float(match.group(1)) if match else None
 
 

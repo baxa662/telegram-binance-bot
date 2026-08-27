@@ -191,6 +191,10 @@ class BinanceFuturesClient:
     def new_order(self, **params) -> dict:
         return self._request("POST", "/fapi/v1/order", params, signed=True)
 
+    def new_algo_order(self, **params) -> dict:
+        params.setdefault("algoType", "CONDITIONAL")
+        return self._request("POST", "/fapi/v1/algoOrder", params, signed=True)
+
     def market_entry(self, symbol: str, direction: str, quantity: float) -> dict:
         side = "BUY" if direction == "LONG" else "SELL"
         return self.new_order(
@@ -203,11 +207,11 @@ class BinanceFuturesClient:
 
     def place_stop_close(self, symbol: str, direction: str, stop_price: float) -> dict:
         side = "SELL" if direction == "LONG" else "BUY"
-        return self.new_order(
+        return self.new_algo_order(
             symbol=symbol,
             side=side,
             type="STOP_MARKET",
-            stopPrice=_decimal_str(stop_price),
+            triggerPrice=_decimal_str(stop_price),
             closePosition="true",
             workingType="MARK_PRICE",
             priceProtect="true",
@@ -215,11 +219,11 @@ class BinanceFuturesClient:
 
     def place_take_profit(self, symbol: str, direction: str, stop_price: float, quantity: float) -> dict:
         side = "SELL" if direction == "LONG" else "BUY"
-        return self.new_order(
+        return self.new_algo_order(
             symbol=symbol,
             side=side,
             type="TAKE_PROFIT_MARKET",
-            stopPrice=_decimal_str(stop_price),
+            triggerPrice=_decimal_str(stop_price),
             quantity=_decimal_str(quantity),
             reduceOnly="true",
             workingType="MARK_PRICE",
@@ -229,11 +233,22 @@ class BinanceFuturesClient:
     def query_order(self, symbol: str, order_id: int) -> dict:
         return self._request("GET", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}, signed=True)
 
+    def query_algo_order(self, algo_id: int) -> dict:
+        return self._request("GET", "/fapi/v1/algoOrder", {"algoId": algo_id}, signed=True)
+
     def cancel_order(self, symbol: str, order_id: int) -> dict:
         return self._request("DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}, signed=True)
 
+    def cancel_algo_order(self, algo_id: int) -> dict:
+        return self._request("DELETE", "/fapi/v1/algoOrder", {"algoId": algo_id}, signed=True)
+
+    def cancel_all_algo_open_orders(self, symbol: str) -> dict:
+        return self._request("DELETE", "/fapi/v1/algoOpenOrders", {"symbol": symbol}, signed=True)
+
     def cancel_all_open_orders(self, symbol: str) -> dict:
-        return self._request("DELETE", "/fapi/v1/allOpenOrders", {"symbol": symbol}, signed=True)
+        regular = self._request("DELETE", "/fapi/v1/allOpenOrders", {"symbol": symbol}, signed=True)
+        algo = self.cancel_all_algo_open_orders(symbol)
+        return {"regular": regular, "algo": algo}
 
     def close_position_market(self, symbol: str) -> dict | None:
         pos = self.position(symbol)

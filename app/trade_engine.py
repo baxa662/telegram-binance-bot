@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from binance_api import BinanceAPIError, execution_client, market_data_client
 from config import settings
@@ -127,22 +128,24 @@ async def _open_trade(trade: dict, current_price: float):
             entry_price = avg
 
         stop_resp = await asyncio.to_thread(client.place_stop_close, signal.symbol, signal.direction, sl)
-        stop_order_id = int(stop_resp["orderId"])
+        stop_order_id = int(stop_resp["algoId"])
 
         allocations = _tp_allocations(len(tps))
-        remaining = qty
+        remaining = Decimal(str(qty))
         for idx, (tp, alloc) in enumerate(zip(tps, allocations)):
             if idx == len(tps) - 1:
-                tp_qty = remaining
+                tp_qty = await asyncio.to_thread(
+                    client.normalize_quantity, signal.symbol, float(remaining), True
+                )
             else:
                 tp_qty = await asyncio.to_thread(client.normalize_quantity, signal.symbol, qty * alloc, True)
-                tp_qty = min(tp_qty, remaining)
+                tp_qty = min(tp_qty, float(remaining))
             if tp_qty <= 0:
                 tp_order_ids.append(None)
                 continue
             resp = await asyncio.to_thread(client.place_take_profit, signal.symbol, signal.direction, tp, tp_qty)
-            tp_order_ids.append(int(resp["orderId"]))
-            remaining = max(0.0, remaining - tp_qty)
+            tp_order_ids.append(int(resp["algoId"]))
+            remaining = max(Decimal("0"), remaining - Decimal(str(tp_qty)))
 
     update_trade(
         trade["id"],
@@ -199,11 +202,11 @@ async def _replace_stop(trade: dict, new_stop: float):
         old_id = trade.get("stop_order_id")
         if old_id:
             try:
-                await asyncio.to_thread(client.cancel_order, trade["symbol"], int(old_id))
+                await asyncio.to_thread(client.cancel_algo_order, int(old_id))
             except Exception:
                 logger.warning("No se pudo cancelar SL anterior %s", old_id, exc_info=True)
         resp = await asyncio.to_thread(client.place_stop_close, trade["symbol"], trade["direction"], normalized)
-        new_order_id = int(resp["orderId"])
+        new_order_id = int(resp["algoId"])
 
     update_trade(trade["id"], current_stop_loss=normalized, stop_order_id=new_order_id)
     await sl_moved(get_trade(trade["id"]), old, normalized)
@@ -228,8 +231,8 @@ async def _sync_live_trade(trade: dict):
     for i, order_id in enumerate(order_ids):
         if i >= len(filled) or filled[i] or not order_id:
             continue
-        order = await asyncio.to_thread(client.query_order, trade["symbol"], int(order_id))
-        if order.get("status") == "FILLED":
+        order = await asyncio.to_thread(client.query_algo_order, int(order_id))
+        if order.get("algoStatus") == "FINISHED":
             filled[i] = True
             changed = True
             await tp_filled(trade, i, tps[i])
