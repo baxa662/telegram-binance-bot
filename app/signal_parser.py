@@ -3,23 +3,31 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from models import Signal
+try:
+    from app.models import Signal
+except ModuleNotFoundError:  # pragma: no cover - compatibility for direct script execution
+    from models import Signal
 
 
 def _normalize_text(text: str) -> str:
     return (
-        text.replace("–", "-")
+        text.replace("**", "")
+        .replace("•", "")
+        .replace("–", "-")
         .replace("—", "-")
         .replace("\u00a0", " ")
         .replace(",", ".")
+        .replace("/ USDT", " USDT")
         .strip()
     )
 
 
 def _extract_symbol(text: str) -> Optional[str]:
     patterns = [
+        r"\$([A-Z0-9]{2,15})\s*(?:/\s*USDT|\s*-\s*(?:LONG|SHORT)|\s*\(.*?\))",
         r"\$([A-Z0-9]{2,15})\s*-\s*(?:LONG|SHORT)",
         r"(?:long|short)\s+en\s+\$([A-Z0-9]{2,15})",
+        r"\$([A-Z0-9]{2,15})\s*/\s*USDT",
         r"\$([A-Z0-9]{2,15})",
     ]
     for pattern in patterns:
@@ -40,8 +48,8 @@ def _extract_direction(text: str) -> Optional[str]:
 
 def _extract_entry(text: str) -> Optional[tuple[float, float]]:
     patterns = [
-        r"(?:Entrada|Mi entrada)\s*:\s*([\d.]+)\s*-\s*([\d.]+)",
-        r"(?:Entrada|Mi entrada)\s*:\s*([\d.]+)",
+        r"(?:Entrada|Mi entrada|Entrada\s*\([^)]*\))\s*:\s*([\d.]+)\s*-\s*([\d.]+)",
+        r"(?:Entrada|Mi entrada|Entrada\s*\([^)]*\))\s*:\s*([\d.]+)",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -54,13 +62,13 @@ def _extract_entry(text: str) -> Optional[tuple[float, float]]:
 
 
 def _extract_take_profits(text: str) -> list[float]:
-    pairs = re.findall(r"TP\s*(\d+)\s*:\s*([\d.]+)", text, re.IGNORECASE)
+    pairs = re.findall(r"TP\s*(\d+)\s*(?:\([^)]*\))?\s*:\s*([\d.]+)", text, re.IGNORECASE)
     pairs.sort(key=lambda item: int(item[0]))
     return [float(value) for _, value in pairs]
 
 
 def _extract_stop_loss(text: str) -> Optional[float]:
-    match = re.search(r"\b(?:SL|Stop\s+Loss)\s*:\s*([\d.]+)", text, re.IGNORECASE)
+    match = re.search(r"\b(?:SL|Stop\s+Loss)\s*(?:\*\*)?\s*:\s*([\d.]+)", text, re.IGNORECASE)
     return float(match.group(1)) if match else None
 
 
@@ -74,7 +82,7 @@ def _extract_leverage(text: str) -> Optional[int]:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             return int(match.group(1))
-    return None
+    return 1
 
 
 def _extract_margin_type(text: str) -> str:
@@ -116,8 +124,10 @@ def parse_signal(text: str) -> Optional[Signal]:
     stop_loss = _extract_stop_loss(text)
     leverage = _extract_leverage(text)
     tps = _extract_take_profits(text)
-    if not all([symbol, direction, stop_loss, leverage]) or not tps:
+    if not all([symbol, direction, stop_loss]) or not tps:
         return None
+    if leverage <= 0:
+        leverage = 1
 
     signal = Signal(
         symbol=symbol,

@@ -50,6 +50,23 @@ Sesgo: Alcista con potencial de continuidad si se mantiene el soporte de la zona
 This message was sent automatically with n8n
 """
 
+MAGMA_SHORT = """
+**Setup short — $MAGMA / USDT (15m)**
+
+** • Entrada (limit sell):** 0,5300 – 0,5350
+Zona de reintento hacia el máximo reciente (0,53883).
+** • Stop Loss:** 0,5500
+Por encima del máximo local, con margen amplio dado lo errático que viene siendo este token.
+** • TP1 (parcial ~40-50%):** 0,50470
+Zona de la MA(7), casi coincidente con la MA(99) (0,50302) — doble soporte ahí.
+** • TP2:** 0,47354
+MA(25).
+** • TP3 (runner):** 0,41137
+Mínimo del ciclo reciente, si hay reversión más profunda.
+
+**R/B:** con entrada en 0,5320 y SL en 0,5500, riesgo ~0,013 contra ~0,027 hasta TP1 → aprox 1:2, razonable.
+"""
+
 
 def test_icp():
     s = parse_signal(ICP)
@@ -77,3 +94,14 @@ def test_apt_with_expanded_stop_loss_label():
     assert s.take_profits == [0.093934, 0.095250, 0.097223]
     assert s.leverage == 5
     assert s.margin_type == "ISOLATED"
+
+
+def test_magma_short_setup():
+    s = parse_signal(MAGMA_SHORT)
+    assert s is not None
+    assert s.symbol == "MAGMAUSDT"
+    assert s.direction == "SHORT"
+    assert (s.entry_min, s.entry_max) == (0.5300, 0.5350)
+    assert s.stop_loss == 0.5500
+    assert s.take_profits == [0.50470, 0.47354, 0.41137]
+    assert s.leverage == 1
