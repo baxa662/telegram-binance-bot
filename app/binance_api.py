@@ -45,7 +45,7 @@ class BinanceFuturesClient:
         self.timeout = settings.binance_timeout_seconds
         self.recv_window = settings.binance_recv_window
         self.session = requests.Session()
-        self.time_offset_ms = -1000
+        self.time_offset_ms = 0
         self._exchange_info_cache: dict[str, Any] | None = None
         self._exchange_info_cached_at = 0.0
 
@@ -53,38 +53,50 @@ class BinanceFuturesClient:
         return {"X-MBX-APIKEY": self.api_key} if self.api_key else {}
 
     def _request(self, method: str, path: str, params: dict | None = None, signed: bool = False):
-        params = dict(params or {})
-        if signed:
-            if not self.api_key or not self.api_secret:
-                raise BinanceAPIError("API key/secret no configurados para este entorno")
-            params["timestamp"] = int(time.time() * 1000) + self.time_offset_ms
-            params["recvWindow"] = self.recv_window
-            query = urlencode(params, doseq=True)
-            signature = hmac.new(
-                self.api_secret.encode("utf-8"),
-                query.encode("utf-8"),
-                hashlib.sha256,
-            ).hexdigest()
-            params["signature"] = signature
+        original_params = dict(params or {})
+        for attempt in range(2 if signed else 1):
+            request_params = dict(original_params)
+            if signed:
+                if not self.api_key or not self.api_secret:
+                    raise BinanceAPIError("API key/secret no configurados para este entorno")
+                request_params["timestamp"] = int(time.time() * 1000) + self.time_offset_ms
+                request_params["recvWindow"] = self.recv_window
+                query = urlencode(request_params, doseq=True)
+                signature = hmac.new(
+                    self.api_secret.encode("utf-8"),
+                    query.encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                request_params["signature"] = signature
 
-        url = f"{self.base_url}{path}"
-        response = self.session.request(
-            method=method,
-            url=url,
-            params=params,
-            headers=self._headers(),
-            timeout=self.timeout,
-        )
-        try:
-            payload = response.json()
-        except Exception:
-            payload = response.text + params
+            url = f"{self.base_url}{path}"
+            response = self.session.request(
+                method=method,
+                url=url,
+                params=request_params,
+                headers=self._headers(),
+                timeout=self.timeout,
+            )
+            try:
+                payload = response.json()
+            except Exception:
+                payload = response.text
 
-        if response.status_code >= 400:
-            raise BinanceAPIError(f"HTTP {response.status_code}: {payload}")
-        if isinstance(payload, dict) and isinstance(payload.get("code"), int) and payload["code"] < 0:
-            raise BinanceAPIError(str(payload))
-        return payload
+            is_timestamp_error = (
+                isinstance(payload, dict) and payload.get("code") == -1021
+            )
+            if signed and attempt == 0 and is_timestamp_error:
+                logger.warning("Timestamp Binance desfasado; sincronizando hora y reintentando")
+                self.sync_time()
+                continue
+
+            if response.status_code >= 400:
+                raise BinanceAPIError(f"HTTP {response.status_code}: {payload}")
+            if isinstance(payload, dict) and isinstance(payload.get("code"), int) and payload["code"] < 0:
+                raise BinanceAPIError(str(payload))
+            return payload
+
+        raise BinanceAPIError("No se pudo completar la solicitud a Binance")
 
     def sync_time(self) -> None:
         payload = self._request("GET", "/fapi/v1/time")
@@ -147,13 +159,7 @@ class BinanceFuturesClient:
         return float(data["markPrice"])
 
     def balance(self) -> list[dict]:
-        try:
-            return self._request("GET", "/fapi/v2/balance", signed=True)
-        except BinanceAPIError as exc:
-            if "-1021" in str(exc):
-                self.sync_time()
-                return self._request("GET", "/fapi/v2/balance", signed=True)
-            raise
+        return self._request("GET", "/fapi/v2/balance", signed=True)
 
     def usdt_balance(self) -> dict:
         for item in self.balance():
