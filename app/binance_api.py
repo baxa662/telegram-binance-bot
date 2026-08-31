@@ -78,7 +78,7 @@ class BinanceFuturesClient:
         try:
             payload = response.json()
         except Exception:
-            payload = response.text
+            payload = response.text + params
 
         if response.status_code >= 400:
             raise BinanceAPIError(f"HTTP {response.status_code}: {payload}")
