@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -30,6 +30,22 @@ logger = logging.getLogger(__name__)
 
 WAITING_MANUAL_SIGNAL = 1
 
+BOT_COMMANDS = (
+    ("help", "Muestra todos los comandos disponibles"),
+    ("status", "Muestra el modo y estado del bot"),
+    ("balance", "Consulta el balance disponible en USDT"),
+    ("positions", "Lista las posiciones abiertas"),
+    ("lastsignal", "Muestra la ultima señal guardada"),
+    ("signals", "Lista las ultimas señales recibidas"),
+    ("trades", "Lista los ultimos trades del bot"),
+    ("pause", "Pausa la apertura de nuevas operaciones"),
+    ("resume", "Reanuda la apertura de operaciones"),
+    ("exec_signal", "Permite cargar una señal manualmente"),
+    ("breakeven", "Mueve el SL a entrada: /breakeven BTCUSDT"),
+    ("close", "Cierra una posicion: /close BTCUSDT"),
+    ("cancel", "Cancela la carga de una señal manual"),
+)
+
 
 def _authorized(update: Update) -> bool:
     return bool(update.effective_chat and update.effective_chat.id == settings.telegram_admin_chat_id)
@@ -41,6 +57,14 @@ async def _guard(update: Update) -> bool:
     if update.message:
         await update.message.reply_text("No autorizado.")
     return False
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update):
+        return
+    lines = ["Comandos disponibles", ""]
+    lines.extend(f"/{name} - {description}" for name, description in BOT_COMMANDS)
+    await update.message.reply_text("\n".join(lines))
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -246,6 +270,7 @@ def build_bot_application() -> Application:
     app = Application.builder().token(settings.telegram_bot_token).build()
     app.add_handler(manual_signal_conversation())
     for name, fn in [
+        ("help", help_command),
         ("status", status_command),
         ("balance", balance_command),
         ("positions", positions_command),
@@ -264,6 +289,12 @@ def build_bot_application() -> Application:
 async def start_bot_commands():
     app = build_bot_application()
     await app.initialize()
+    try:
+        await app.bot.set_my_commands(
+            [BotCommand(name, description) for name, description in BOT_COMMANDS]
+        )
+    except Exception:
+        logger.exception("No se pudo registrar el menu de comandos en Telegram")
     await app.start()
     await app.updater.start_polling(drop_pending_updates=False)
     logger.info("Bot de comandos iniciado")

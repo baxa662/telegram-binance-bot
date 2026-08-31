@@ -11,7 +11,7 @@ Bot Python para Coolify que:
 - En TESTNET/PRODUCTION abre MARKET, coloca SL y TPs parciales.
 - Mueve SL a break-even despues de TP1 y a TP1 despues de TP2.
 - Guarda estado en SQLite para sobrevivir redeploys.
-- Comandos Telegram: `/status`, `/balance`, `/positions`, `/signals`, `/lastsignal`, `/trades`, `/pause`, `/resume`, `/exec_signal`, `/breakeven SYMBOL`, `/close SYMBOL`.
+- Comandos Telegram: `/help`, `/status`, `/balance`, `/positions`, `/signals`, `/lastsignal`, `/trades`, `/pause`, `/resume`, `/exec_signal`, `/breakeven SYMBOL`, `/close SYMBOL`, `/cancel`.
 
 ## 1. Coolify
 
