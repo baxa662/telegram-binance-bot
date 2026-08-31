@@ -45,7 +45,7 @@ class BinanceFuturesClient:
         self.timeout = settings.binance_timeout_seconds
         self.recv_window = settings.binance_recv_window
         self.session = requests.Session()
-        self.time_offset_ms = 0
+        self.time_offset_ms = -1000
         self._exchange_info_cache: dict[str, Any] | None = None
         self._exchange_info_cached_at = 0.0
 

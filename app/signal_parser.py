@@ -82,7 +82,7 @@ def _extract_leverage(text: str) -> Optional[int]:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             return int(match.group(1))
-    return 1
+    return 3
 
 
 def _extract_margin_type(text: str) -> str:
