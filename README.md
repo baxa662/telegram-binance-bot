@@ -11,7 +11,7 @@ Bot Python para Coolify que:
 - En TESTNET/PRODUCTION abre MARKET, coloca SL y TPs parciales.
 - Mueve SL a break-even despues de TP1 y a TP1 despues de TP2.
 - Guarda estado en SQLite para sobrevivir redeploys.
-- Comandos Telegram: `/status`, `/balance`, `/positions`, `/signals`, `/lastsignal`, `/trades`, `/pause`, `/resume`, `/breakeven SYMBOL`, `/close SYMBOL`.
+- Comandos Telegram: `/status`, `/balance`, `/positions`, `/signals`, `/lastsignal`, `/trades`, `/pause`, `/resume`, `/exec_signal`, `/breakeven SYMBOL`, `/close SYMBOL`.
 
 ## 1. Coolify
 
@@ -97,6 +97,8 @@ Para produccion:
 El bot usa `ENTRY_STRATEGY=MARKET_IF_IN_RANGE`.
 
 Cuando recibe una señal, crea `PENDING_ENTRY`. Cada pocos segundos consulta mark price. Solo abre cuando el precio esta dentro del rango (con tolerancia configurable). Si no toca el rango antes de `SIGNAL_EXPIRY_MINUTES`, expira.
+
+Para cargar una señal manualmente desde el chat administrador, envia `/exec_signal` y, cuando el bot lo solicite, pega el texto completo. Se usa el mismo parser y flujo de ejecucion que para las señales del canal. Si el formato no es valido puedes corregirlo y reenviarlo, o salir con `/cancel`.
 
 ## 6. Riesgo
 

@@ -5,7 +5,14 @@ import json
 import logging
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 
 from binance_api import execution_client, market_data_client
 from config import settings
@@ -16,9 +23,12 @@ from database import (
     list_trades,
     set_paused,
 )
+from signal_processor import process_signal_text
 from trade_engine import manual_breakeven, manual_close
 
 logger = logging.getLogger(__name__)
+
+WAITING_MANUAL_SIGNAL = 1
 
 
 def _authorized(update: Update) -> bool:
@@ -162,8 +172,79 @@ async def close_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {exc}")
 
 
+async def exec_signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update):
+        return ConversationHandler.END
+    await update.message.reply_text(
+        "Envia ahora el texto completo de la señal. Usare el parser normal del bot.\n\n"
+        "Puedes cancelar con /cancel."
+    )
+    return WAITING_MANUAL_SIGNAL
+
+
+async def receive_manual_signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update):
+        return ConversationHandler.END
+
+    try:
+        result = await process_signal_text(
+            update.message.text or "",
+            chat_id=update.effective_chat.id,
+            message_id=update.message.message_id,
+        )
+    except Exception as exc:
+        logger.exception("Error procesando señal manual")
+        await update.message.reply_text(f"No pude procesar la señal: {exc}")
+        return ConversationHandler.END
+
+    if result is None:
+        await update.message.reply_text(
+            "No pude reconocer una señal valida. Revisa simbolo, LONG/SHORT, entrada, "
+            "al menos un TP, SL y vuelve a enviarla; o usa /cancel."
+        )
+        return WAITING_MANUAL_SIGNAL
+
+    if result.enqueue_error:
+        await update.message.reply_text(
+            f"Señal #{result.signal_id} guardada, pero no se pudo encolar: "
+            f"{result.enqueue_error}"
+        )
+    elif result.trade_id:
+        await update.message.reply_text(
+            f"Señal #{result.signal_id} aceptada. Trade pendiente #{result.trade_id}: "
+            f"{result.signal.symbol} {result.signal.direction}."
+        )
+    else:
+        await update.message.reply_text(
+            f"Señal #{result.signal_id} guardada: {result.signal.symbol} "
+            f"{result.signal.direction}. Modo MONITOR: no se creo un trade."
+        )
+    return ConversationHandler.END
+
+
+async def cancel_signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _guard(update):
+        return ConversationHandler.END
+    await update.message.reply_text("Carga manual de señal cancelada.")
+    return ConversationHandler.END
+
+
+def manual_signal_conversation() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[CommandHandler("exec_signal", exec_signal_command)],
+        states={
+            WAITING_MANUAL_SIGNAL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_manual_signal)
+            ]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_signal_command)],
+        allow_reentry=True,
+    )
+
+
 def build_bot_application() -> Application:
     app = Application.builder().token(settings.telegram_bot_token).build()
+    app.add_handler(manual_signal_conversation())
     for name, fn in [
         ("status", status_command),
         ("balance", balance_command),

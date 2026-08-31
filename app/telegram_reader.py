@@ -5,11 +5,9 @@ import logging
 from telethon import TelegramClient, events
 
 from config import settings
-from database import is_message_processed, mark_message_processed, save_signal
+from database import is_message_processed, mark_message_processed
 from notifier import error as notify_error
-from notifier import signal_detected
-from signal_parser import parse_signal
-from trade_engine import enqueue_signal
+from signal_processor import process_signal_text
 
 logger = logging.getLogger(__name__)
 
@@ -30,23 +28,10 @@ async def on_signal_message(event):
         return
 
     try:
-        signal = parse_signal(text)
         mark_message_processed(chat_id, message_id)
-        if signal is None:
+        result = await process_signal_text(text, chat_id=chat_id, message_id=message_id)
+        if result is None:
             logger.info("Mensaje %s ignorado: no parece señal", message_id)
-            return
-
-        signal_id = save_signal(chat_id, message_id, signal, text)
-        logger.info("Señal %s guardada: %s %s", signal_id, signal.symbol, signal.direction)
-        await signal_detected(signal, settings.trading_mode)
-
-        try:
-            trade_id = await enqueue_signal(signal_id, signal)
-            if trade_id:
-                logger.info("Trade pendiente creado id=%s", trade_id)
-        except Exception as exc:
-            logger.warning("Señal guardada pero no encolada: %s", exc)
-            await notify_error(f"Señal {signal.symbol}: {exc}")
     except Exception as exc:
         logger.exception("Error procesando mensaje Telegram")
         await notify_error(f"Mensaje {message_id}: {exc}")
