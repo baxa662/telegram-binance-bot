@@ -10,6 +10,7 @@ def calculate_trade_plan(
     max_leverage: int,
     max_margin_percent: float,
     entry_price: float | None = None,
+    ignore_risk_percent: bool = False,
 ) -> TradePlan:
     if account_balance <= 0:
         raise ValueError("Balance disponible invalido")
@@ -31,7 +32,7 @@ def calculate_trade_plan(
     max_notional = max_margin * leverage
     quantity_by_margin = max_notional / entry
 
-    quantity = min(quantity_by_risk, quantity_by_margin)
+    quantity = quantity_by_margin if ignore_risk_percent else min(quantity_by_risk, quantity_by_margin)
     if quantity <= 0:
         raise ValueError("Cantidad calculada invalida")
 

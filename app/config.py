@@ -56,6 +56,7 @@ class Settings:
     binance_timeout_seconds: int
 
     risk_percent: float
+    ignore_risk_percent: bool
     max_leverage: int
     max_margin_percent: float
     max_open_trades: int
@@ -128,6 +129,7 @@ def load_settings() -> Settings:
         binance_recv_window=_int("BINANCE_RECV_WINDOW", 5000),
         binance_timeout_seconds=_int("BINANCE_TIMEOUT_SECONDS", 10),
         risk_percent=_float("RISK_PERCENT", 1.0),
+        ignore_risk_percent=_bool("IGNORE_RISK_PERCENT", False),
         max_leverage=_int("MAX_LEVERAGE", 15),
         max_margin_percent=_float("MAX_MARGIN_PERCENT", 25.0),
         max_open_trades=_int("MAX_OPEN_TRADES", 3),

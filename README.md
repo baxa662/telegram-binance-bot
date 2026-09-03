@@ -104,6 +104,7 @@ Para cargar una señal manualmente desde el chat administrador, envia `/exec_sig
 
 ```env
 RISK_PERCENT=1.0
+IGNORE_RISK_PERCENT=false
 MAX_LEVERAGE=15
 MAX_MARGIN_PERCENT=25
 MAX_OPEN_TRADES=3
@@ -115,6 +116,18 @@ La cantidad se limita por:
 2. margen maximo permitido.
 
 Se usa el menor de ambos tamaños.
+
+Si quieres utilizar siempre el margen máximo configurado e ignorar el límite de
+riesgo al SL, configura `IGNORE_RISK_PERCENT=true`. Por ejemplo, para usar el
+15% del balance disponible como margen:
+
+```env
+MAX_MARGIN_PERCENT=15
+IGNORE_RISK_PERCENT=true
+```
+
+El tamaño final puede quedar levemente por debajo tras ajustarse al incremento
+de cantidad permitido por Binance.
 
 ## 7. Take profits y SL
 

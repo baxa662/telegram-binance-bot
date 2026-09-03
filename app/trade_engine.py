@@ -95,6 +95,7 @@ async def _open_trade(trade: dict, current_price: float):
         settings.max_leverage,
         settings.max_margin_percent,
         entry_price=current_price,
+        ignore_risk_percent=settings.ignore_risk_percent,
     )
     client = execution_client()
     qty = await asyncio.to_thread(client.normalize_quantity, signal.symbol, plan.quantity, True)

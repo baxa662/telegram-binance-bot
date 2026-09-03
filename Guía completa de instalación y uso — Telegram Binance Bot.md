@@ -383,6 +383,7 @@ Configuración recomendada inicial:
 
 ```env
 RISK_PERCENT=1.0
+IGNORE_RISK_PERCENT=false
 MAX_LEVERAGE=15
 MAX_MARGIN_PERCENT=25
 MAX_OPEN_TRADES=3
@@ -412,6 +413,17 @@ el riesgo máximo aproximado hasta SL será:
 ```text
 10 USDT
 ```
+
+## IGNORE_RISK_PERCENT
+
+```env
+IGNORE_RISK_PERCENT=false
+```
+
+Por defecto el bot limita la cantidad tanto por riesgo al SL como por margen.
+Si defines `IGNORE_RISK_PERCENT=true`, omite el límite por `RISK_PERCENT` y
+usa el margen máximo definido en `MAX_MARGIN_PERCENT`. Para usar el 15% del
+balance disponible como margen, configura además `MAX_MARGIN_PERCENT=15`.
 
 ---
 
@@ -675,6 +687,7 @@ BINANCE_RECV_WINDOW=5000
 BINANCE_TIMEOUT_SECONDS=10
 
 RISK_PERCENT=1.0
+IGNORE_RISK_PERCENT=false
 MAX_LEVERAGE=15
 MAX_MARGIN_PERCENT=25
 MAX_OPEN_TRADES=3
@@ -1405,6 +1418,7 @@ Yo usaría:
 TRADING_MODE=PAPER
 
 RISK_PERCENT=1.0
+IGNORE_RISK_PERCENT=false
 MAX_LEVERAGE=15
 MAX_MARGIN_PERCENT=25
 MAX_OPEN_TRADES=3
